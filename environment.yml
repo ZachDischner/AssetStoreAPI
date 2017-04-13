@@ -1,0 +1,5 @@
+name: assetpy
+dependencies:
+  - python=3.6
+  - flask
+  - flask_restful
