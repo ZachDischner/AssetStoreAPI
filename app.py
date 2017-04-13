@@ -19,7 +19,9 @@ https://gist.github.com/bcavagnolo/14a869f0e9df6f37d203cc832ec1125d
 ##############################################################################
 #                               Imports
 #----------*----------*----------*----------*----------*----------*----------*
-from flask import Flask, abort, jsonify, request
+from flask import Flask, abort, jsonify, request, g
+from flask_httpauth import HTTPBasicAuth
+from collections import OrderedDict
 import json
 import sys
 import traceback
@@ -46,6 +48,7 @@ def reset_asset_db():
     """Trivial"""
     global assets
     assets = []
+    Asset.NAMES = []
 
 class Asset(dict):
     """Super simple base class to form Asset objects. 
@@ -58,7 +61,7 @@ class Asset(dict):
     NAMES = []
 
     ## Some Requirement Placeholders
-    VALID_TYPES = {
+    VALID_CLASSES = {
         "satellite": ["dove", "rapideye"],
         "antenna": ["dish", "yagi"]
         }
@@ -66,23 +69,26 @@ class Asset(dict):
     REQUIRED = ["asset_name", "asset_type", "asset_class"]
 
     def __repr__(self):
-        return json.dumps(self,indent=2)
+        return json.dumps(self, indent=2)
 
     @classmethod
-    def validate(cls, asset_name, asset_type, asset_class):
+    def validate(cls, asset_name, asset_type, asset_class, **details):
         if asset_name in cls.NAMES:
             msg = f"PROBREM! Asset asset_named '{asset_name}' already exists!"
             # abort(400)
             return (False, msg)
         ## Regex the asset_name
 
-        if asset_type not in cls.VALID_TYPES:
-            msg = f"Specified type '{asset_type}' is not recognized. Must be one of: {cls.VALID_TYPES.keys()}"
+        if asset_type not in cls.VALID_CLASSES:
+            msg = f"Specified type '{asset_type}' is not recognized. Must be one of: {cls.VALID_CLASSES.keys()}"
             return (False, msg)
 
-        if asset_class not in cls.VALID_TYPES[asset_type]:
-            msg = f"Specified asset class '{asset_class}' is not allowable for asset type '{asset_type}'. Allowed classes: {cls.VALID_TYPES[asset_type]}"
+        if asset_class not in cls.VALID_CLASSES[asset_type]:
+            msg = f"Specified asset class '{asset_class}' is not allowable for asset type '{asset_type}'. Allowed classes: {cls.VALID_CLASSES[asset_type]}"
             return (False, msg)
+
+        if len(details) > 0:
+            print("Have details!")
         return (True, "Asset specifications are valid")
 
 
@@ -117,46 +123,78 @@ def add_single_asset(asset_name, asset_type, asset_class, **details):
 #----------*----------*----------*----------*----------*----------*----------*
 app = Flask(__name__)
 
+#--------------------------------Authentication-------------------------------
+auth = HTTPBasicAuth()
 
+@auth.get_password
+def get_password(username):
+    g.current_user = username
+    print(f"Username is '{username}'")
+    if username == 'admin':
+        return ''
+    if username == "sudo":
+        return "rm/*"
+    return None
+
+
+@auth.error_handler
+def unauthorized(msg=None):
+     message = {'status':401, 'Message': 'Unauthorized access', "detail": msg}
+     resp = jsonify(message)
+     resp.status_code = 401
+     return resp
+
+#--------------------------------Error Handlers-------------------------------
 @app.errorhandler(404)
 def not_found(error=None):
     message = {'status': 404, 'message':'Not Found: ' + request.url, "detail": error}
-    resp=jsonify(message)
+    resp = jsonify(message)
     resp.status_code = 404
     return resp
 
 @app.errorhandler(400)
 def malformed(error=None):
     message = {'status': 400, 'message':'Malformed Argument: ' + request.url, "detail":str(error)}
-    resp=jsonify(message)
+    resp = jsonify(message)
     resp.status_code = 400
     return resp
 
 @app.errorhandler(500)
 def internal_error(error=None):
     message = {'status': 500, 'message':'Problem occurred processing ' + request.url, "detail": error}
-    resp=jsonify(message)
+    resp = jsonify(message)
     resp.status_code = 500
     return resp
+
+
+#----------------------------------Endpoints--------------------------------
 
 @app.route('/')
 def index():
     message = {'message':"Welcome to the PlanetLabs Asset Store API!"} 
     return jsonify(message)
 
-@app.route('/api/v1.0/assets', methods=['GET', 'DELETE'])  ## Delete is admin only for testing
-@app.route('/api/v1.0/assets/', methods=['GET', 'DELETE'])
+@app.route('/api/v1.0/assets', methods=['GET'])
+@app.route('/api/v1.0/assets/', methods=['GET'])
 def get_tasks():
-    if request.method == "GET":
-        return jsonify({'assets': assets})
-    if request.method == "DELETE":
-        reset_asset_db()
-        return jsonify({'assets': assets})
+    return jsonify({'assets': assets})
+
+## Delete is admin only for testing
+@app.route('/api/v1.0/assets', methods=['DELETE'])
+@app.route('/api/v1.0/assets/', methods=['DELETE'])
+@auth.login_required
+def drop_tasks():
+    print(f"User: {g.current_user}")
+    if g.current_user != "sudo":
+        return unauthorized(msg="Only a super user can delete the database")
+    reset_asset_db()
+    return jsonify({'assets': assets})
 
 @app.route('/api/v1.0/assets/<asset_name>', methods=["POST", "GET"])
+@auth.login_required
 def single_task(asset_name):
-    print(f"Request method, {request.method}")
-    ## Add a single task to the database
+
+    ## Add a single asset to the database
     if request.method == "POST":
         print("Post data: ", str(request.get_json()))
         asset_specs = request.get_json()
@@ -175,7 +213,6 @@ def single_task(asset_name):
             return json.dumps(asset)
         except StopIteration:
             return not_found(f"Asset named {asset_name} doesn't exist")
-
 
 
 if __name__ == '__main__':
