@@ -23,6 +23,7 @@ from flask import Flask, abort, jsonify, request, g
 from flask_httpauth import HTTPBasicAuth
 from collections import OrderedDict
 import json
+import re
 import sys
 import traceback
 
@@ -68,31 +69,96 @@ class Asset(dict):
 
     REQUIRED = ["asset_name", "asset_type", "asset_class"]
 
+    ## Pretty print representation just because
     def __repr__(self):
         return json.dumps(self, indent=2)
 
     @classmethod
     def validate(cls, asset_name, asset_type, asset_class, **details):
-        if asset_name in cls.NAMES:
-            msg = f"PROBREM! Asset asset_named '{asset_name}' already exists!"
-            # abort(400)
-            return (False, msg)
-        ## Regex the asset_name
+        """Validate the formation criteria for a new Asset according to project
+        specs https://gist.github.com/bcavagnolo/14a869f0e9df6f37d203cc832ec1125d
+        
+        
+        See __init__ method for argument specs
+        
+        Returns:
+            status: Boolean indicator, are the asset formation args/kwargs valid?
+            msg:    String describing success/failure
+        
+        Examples:
+            >>>Asset.validate("test1","satellite","dove")[0]
+            True
+            
+            >>>Asset.validate("test1","Bad","dove")[0]
+            False
+            
+            >>>Asset.validate("test1","satellite","DOVE")[0]
+            False
+        """
 
+        ## Check to make sure asset name is unique
+        if asset_name in cls.NAMES:
+            msg = f"Integrity Error! Asset asset_named '{asset_name}' already exists!"
+            return (False, msg)
+
+        ## Check for allowable names
+        if not re.findall('^[a-zA-Z0-9][a-zA-Z0-9\-\_]{3,64}$', asset_name):
+            msg = f"Asset name constraints violated! Check name constraints and try again: {asset_name}"
+            return (False, msg)
+
+        ## Make sure specified type is allowed
         if asset_type not in cls.VALID_CLASSES:
             msg = f"Specified type '{asset_type}' is not recognized. Must be one of: {cls.VALID_CLASSES.keys()}"
             return (False, msg)
 
+        ## Make sure specified type of class is allowed
         if asset_class not in cls.VALID_CLASSES[asset_type]:
             msg = f"Specified asset class '{asset_class}' is not allowable for asset type '{asset_type}'. Allowed classes: {cls.VALID_CLASSES[asset_type]}"
             return (False, msg)
 
+        ## Verify that asset details conform to rules
         if len(details) > 0:
-            print("Have details!")
+            # 1. Only antennas can have details
+            if asset_type != "antenna":
+                return (False, "Only antennas are allowed to have details")
+            # 2. Antenna classes have specific constraints too
+            if asset_class == "dish":
+                if (len(details) > 2) or ("diameter" not in details) or ("randome" not in details):
+                    return (False, f"Antenna->dish details must have a 'diameter' and 'randome' keyword. No more.  Provided {details.keys()}")
+                try:
+                    float(details["diameter"])
+                    bool(details["randome"])
+                except:
+                    return (False, f"Dish details could not be converted into a float 'diameter' and boolean 'radome'. Provided {details}")
+            elif asset_class == "yagi":
+                if (len(details) > 1) or ("gain" not in details):
+                    return (False, f"Antenna->yagi details must have a 'gain' keyword. No more.  Provided {details.keys()}")
+                try:
+                    float(details["gain"])
+                except:
+                    return (False, f"Dish details could not be converted into a float 'gain'. Provided {details}")
+
         return (True, "Asset specifications are valid")
 
 
-    def __init__(self, asset_name, asset_type, asset_class, **details):
+    def __init__(self, asset_name, asset_type, asset_class, validate=True, **details):
+        """Create a new asset instance
+        
+        Args:
+            asset_name: String name of the new asset you want to create
+            asset_type: String Type of the asset 
+            asset_class: String Class of the asset type
+    
+        
+        Kwargs:
+            validate: Boolean to see if you want to validate input info prior to creation
+            details: Dictionary Details corresponding to the asset
+        """
+        if validate:
+            status, msg = self.validate(asset_name, asset_type, asset_class, **details)
+            if not status:
+                print(f"Invalid Asset criteria provided: {msg}")
+                return
 
         self.NAMES.append(asset_name)
 
@@ -108,6 +174,12 @@ class Asset(dict):
 #                              Backend Utilities
 # ----------*----------*----------*----------*----------*----------*----------*
 def add_single_asset(asset_name, asset_type, asset_class, **details):
+    """Simple function to create a new Asset() and add it to the database if valid
+    
+    See Asset.__init__ for argument details
+
+    :return: (passfail, msg) Tuple with success boolean and a message describing the results
+    """
     passfail, msg =  Asset.validate(asset_name, asset_type, asset_class)
     if not passfail:
         msg = f"Unable to add new asset: {msg}"
@@ -177,6 +249,13 @@ def index():
 @app.route('/api/v1.0/assets', methods=['GET'])
 @app.route('/api/v1.0/assets/', methods=['GET'])
 def get_tasks():
+    print(f"Request json: {request.get_json()}")
+    ## Check for filtering requirements
+    filters = request.get_json()
+    if "asset_type" in filters:
+        return jsonify({'assets': list(filter(lambda asset: asset['type']==filters["asset_type"], assets))})
+    if "asset_class" in filters:
+        return jsonify({'assets': list(filter(lambda asset: asset['class']==filters["asset_class"], assets))})
     return jsonify({'assets': assets})
 
 ## Delete is admin only for testing
@@ -209,6 +288,7 @@ def single_task(asset_name):
 
     if request.method == "GET":
         try:
+            ## Efficient so we don't have to look through whole list most of the time
             asset = next(a for a in assets if a['name'] == asset_name)
             return json.dumps(asset)
         except StopIteration:
