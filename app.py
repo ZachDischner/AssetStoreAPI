@@ -21,35 +21,20 @@ https://gist.github.com/bcavagnolo/14a869f0e9df6f37d203cc832ec1125d
 #----------*----------*----------*----------*----------*----------*----------*
 from flask import Flask, abort, jsonify, request, g
 from flask_httpauth import HTTPBasicAuth
-from collections import OrderedDict
 import json
 import re
-import sys
-import traceback
 
 ##############################################################################
 #                              Data Management
 #----------*----------*----------*----------*----------*----------*----------*
 # Asset "database", just a list of asset dictionaries. Not super efficient for searching
 # but that is okay for this demo
-assets = [
-    {
-        'name': 'test1',
-        'type': 'satellite',
-        'class': 'dove'
-    },
-    {
-        'name': 'test2',
-        'type': 'antenna',
-        'class': 'dish'
-    },
-]
+assets = []
 
 def reset_asset_db():
     """Trivial"""
     global assets
     assets = []
-    Asset.NAMES = []
 
 class Asset(dict):
     """Super simple base class to form Asset objects. 
@@ -58,9 +43,6 @@ class Asset(dict):
     what would eventually be replaced by a proper database abstraction
     layer
     """
-    ## List of asset names already created, helps verify uniqueness
-    NAMES = []
-
     ## Some Requirement Placeholders
     VALID_CLASSES = {
         "satellite": ["dove", "rapideye"],
@@ -97,7 +79,7 @@ class Asset(dict):
         """
 
         ## Check to make sure asset name is unique
-        if asset_name in cls.NAMES:
+        if asset_name in [asset["name"] for asset in assets]:
             msg = f"Integrity Error! Asset asset_named '{asset_name}' already exists!"
             return (False, msg)
 
@@ -160,27 +142,28 @@ class Asset(dict):
                 print(f"Invalid Asset criteria provided: {msg}")
                 return
 
-        self.NAMES.append(asset_name)
-
         ## Assign Asset specs
         self["name"] = asset_name
         self["type"] = asset_type
         self["class"] = asset_class
 
         ## Add details
-        self.update(details)
+        if len(details) > 0:
+            self["details"] = details
 
 ##############################################################################
 #                              Backend Utilities
 # ----------*----------*----------*----------*----------*----------*----------*
-def add_single_asset(asset_name, asset_type, asset_class, **details):
+def add_single_asset(asset_name, asset_type, asset_class, details=None):
     """Simple function to create a new Asset() and add it to the database if valid
     
     See Asset.__init__ for argument details
 
     :return: (passfail, msg) Tuple with success boolean and a message describing the results
     """
-    passfail, msg =  Asset.validate(asset_name, asset_type, asset_class)
+    if details is None:
+        details = {}
+    passfail, msg =  Asset.validate(asset_name, asset_type, asset_class, **details)
     if not passfail:
         msg = f"Unable to add new asset: {msg}"
     else:
@@ -201,7 +184,6 @@ auth = HTTPBasicAuth()
 @auth.get_password
 def get_password(username):
     g.current_user = username
-    print(f"Username is '{username}'")
     if username == 'admin':
         return ''
     if username == "sudo":
@@ -249,13 +231,16 @@ def index():
 @app.route('/api/v1.0/assets', methods=['GET'])
 @app.route('/api/v1.0/assets/', methods=['GET'])
 def get_tasks():
-    print(f"Request json: {request.get_json()}")
     ## Check for filtering requirements
-    filters = request.get_json()
-    if "asset_type" in filters:
-        return jsonify({'assets': list(filter(lambda asset: asset['type']==filters["asset_type"], assets))})
-    if "asset_class" in filters:
-        return jsonify({'assets': list(filter(lambda asset: asset['class']==filters["asset_class"], assets))})
+    if request.data:
+        filters = request.get_json()
+        if filters:
+            if "asset_type" in filters:
+                return jsonify({'assets': list(filter(lambda asset: asset['type']==filters["asset_type"], assets))})
+            if "asset_class" in filters:
+                return jsonify({'assets': list(filter(lambda asset: asset['class']==filters["asset_class"], assets))})
+
+    ## No filters, return everything!
     return jsonify({'assets': assets})
 
 ## Delete is admin only for testing
@@ -263,7 +248,6 @@ def get_tasks():
 @app.route('/api/v1.0/assets/', methods=['DELETE'])
 @auth.login_required
 def drop_tasks():
-    print(f"User: {g.current_user}")
     if g.current_user != "sudo":
         return unauthorized(msg="Only a super user can delete the database")
     reset_asset_db()
@@ -275,13 +259,11 @@ def single_task(asset_name):
 
     ## Add a single asset to the database
     if request.method == "POST":
-        print("Post data: ", str(request.get_json()))
         asset_specs = request.get_json()
         asset_specs.update({"asset_name":asset_name})
-        print("Decoded")
         if False in [key in asset_specs for key in Asset.REQUIRED]:
             return malformed(f"Must provide all required Asset specifications to create a new Asset: {Asset.REQUIRED}. Missing: {set(Asset.REQUIRED) - (asset_specs.keys())}")
-        passfail, msg = add_single_asset(asset_specs["asset_name"], asset_specs["asset_type"], asset_specs["asset_class"])
+        passfail, msg = add_single_asset(asset_specs["asset_name"], asset_specs["asset_type"], asset_specs["asset_class"], asset_specs.get("asset_details"))
         if passfail:
             return json.dumps(msg)
         return malformed(msg)
