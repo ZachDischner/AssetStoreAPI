@@ -12,7 +12,8 @@ Anaconda's Python distribution is recommended for getting started. Easiest way t
 from the included `environment.yml` file. http://conda.pydata.org/docs/using/envs.html.
 
 ```
-$ conda env create -f environment.yml
+conda env create -f environment.yml
+source activate assetpy 
 ```
 
 Otherwise, if you don't have Anaconda, a working Python 3.6+ environment with a few ancilarly modules is all you need. 
@@ -38,11 +39,13 @@ python app.py
 ### Tests
 Simple test cases are provided in test.py. It is a good resource for how to form requests and access the API. Consult at will
 
-Once the server is running, you may run the following to confirm that all base test cases are passing.
+Once the server is running, you may run the following to confirm that all base test cases are passing. If you run the two side-by-side, you can watch
+test cases and server interpretation simultaniously, which is neat. 
 
 ```
 pytest test.py
 ```
+![Tests](http://i.imgur.com/4k7PEyE.png)
 
 ## Using the App 
 Once started, the API can be accessed at your local URL and port: `http://127.0.0.1:5000`. 
