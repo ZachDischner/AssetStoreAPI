@@ -49,7 +49,8 @@ Once started, the API can be accessed at your local URL and port: `http://127.0.
 
 Provided examples utilize the python `requests` library. Same results can be achieved with plain old `curl` or other similar libraries. 
 
-**Specify Assets** with a `json` dictionary submitted in the request
+**Specify Assets** with a `json` dictionary submitted in the request with `asset_type` and `asset_class` specified. For Antennas, you may also specify 
+`asset_details`, which is a dictionary of information supplied about the antenna asset. Consult the prompt for allowable detail information.
 
 ```json
 {
