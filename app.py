@@ -1,7 +1,5 @@
 #!flask/bin/python
 
-
-
 __author__     = 'Zach Dischner'                      
 __credits__    = ["NA"]
 __license__    = "NA"
@@ -10,16 +8,19 @@ __maintainer__ = "Zach Dischner"
 __email__      = "zach.dischner@gmail.com"
 __status__     = "Dev"
 __doc__        ="""
-Asset RESTful API coding challenge for PlanetLabs.
+Asset Store RESTful API coding challenge for PlanetLabs.
 
 https://gist.github.com/bcavagnolo/14a869f0e9df6f37d203cc832ec1125d
+
+Run with:
+    >> python app.py
 
 """
 
 ##############################################################################
 #                               Imports
 #----------*----------*----------*----------*----------*----------*----------*
-from flask import Flask, abort, jsonify, request, g
+from flask import Flask, jsonify, request, g
 from flask_httpauth import HTTPBasicAuth
 import json
 import re
@@ -41,7 +42,10 @@ class Asset(dict):
 
     Basic dictionary with a few constrained attributes, this class is 
     what would eventually be replaced by a proper database abstraction
-    layer
+    layer.
+    
+    It would be cool and not too difficult to make this work like SQLAlchemy and keep 
+    the data store internal to this class... for another time.
     """
     ## Some Requirement Placeholders
     VALID_CLASSES = {
@@ -159,7 +163,9 @@ def add_single_asset(asset_name, asset_type, asset_class, details=None):
     
     See Asset.__init__ for argument details
 
-    :return: (passfail, msg) Tuple with success boolean and a message describing the results
+    Return
+        passfail: (Bool) Was the addition successful?
+        msg: Details about how it passed/failed
     """
     if details is None:
         details = {}
@@ -183,6 +189,7 @@ auth = HTTPBasicAuth()
 
 @auth.get_password
 def get_password(username):
+    # Simple username password verifier
     g.current_user = username
     if username == 'admin':
         return ''
@@ -190,18 +197,17 @@ def get_password(username):
         return "rm/*"
     return None
 
-
+#--------------------------------Error Handlers-------------------------------
 @auth.error_handler
 def unauthorized(msg=None):
-     message = {'status':401, 'Message': 'Unauthorized access', "detail": msg}
+     message = {'status':401, 'Message': 'Unauthorized access', "detail": str(msg)}
      resp = jsonify(message)
      resp.status_code = 401
      return resp
 
-#--------------------------------Error Handlers-------------------------------
 @app.errorhandler(404)
 def not_found(error=None):
-    message = {'status': 404, 'message':'Not Found: ' + request.url, "detail": error}
+    message = {'status': 404, 'message':'Not Found: ' + request.url, "detail": str(error)}
     resp = jsonify(message)
     resp.status_code = 404
     return resp
@@ -215,7 +221,7 @@ def malformed(error=None):
 
 @app.errorhandler(500)
 def internal_error(error=None):
-    message = {'status': 500, 'message':'Problem occurred processing ' + request.url, "detail": error}
+    message = {'status': 500, 'message':'Problem occurred processing ' + request.url, "detail": str(error)}
     resp = jsonify(message)
     resp.status_code = 500
     return resp
@@ -223,11 +229,17 @@ def internal_error(error=None):
 
 #----------------------------------Endpoints--------------------------------
 
+## Homepage
 @app.route('/')
+@app.route('/api/v1.0')
+@app.route('/api/v1.0/')
 def index():
-    message = {'message':"Welcome to the PlanetLabs Asset Store API!"} 
+    message = {'message':"Welcome to the PlanetLabs Asset Store API!",
+               'ex -get all assets': "/api/v1.0/assets",
+              'ex -get named asset': "/api/v1.0/assets/assetname"}
     return jsonify(message)
 
+## All Assets
 @app.route('/api/v1.0/assets', methods=['GET'])
 @app.route('/api/v1.0/assets/', methods=['GET'])
 def get_tasks():
@@ -253,6 +265,7 @@ def drop_tasks():
     reset_asset_db()
     return jsonify({'assets': assets})
 
+## Single Asset Creation/Retrieval
 @app.route('/api/v1.0/assets/<asset_name>', methods=["POST", "GET"])
 @auth.login_required
 def single_task(asset_name):
@@ -270,7 +283,7 @@ def single_task(asset_name):
 
     if request.method == "GET":
         try:
-            ## Efficient so we don't have to look through whole list most of the time
+            ## Efficient so we don't have to look through whole list most of the time. Neat!
             asset = next(a for a in assets if a['name'] == asset_name)
             return json.dumps(asset)
         except StopIteration:

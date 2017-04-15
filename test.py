@@ -95,11 +95,6 @@ def test_filtered():
     return resp
 
 def main():
-    print("Running all test cases for the Asset API")
-    if is_running() is False:
-        print(f"{API_URL} not reachable, cannot run Asset API tests")
-        return -1
-
     ## Prelim checks - reachable and empty asset datastore
     print("Getting existing Assets")
     resp = test_getall()
